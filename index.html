@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Quét mã QR / mã vạch</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; background:#262626; color:#fff; padding:12px; }
+  main { max-width:440px; margin:0 auto; }
+  h1 { font-size:16px; margin:4px 0 10px; }
+  #reader { width:100%; border-radius:12px; overflow:hidden; background:#000; border:2px solid #EE4D2D; min-height:240px; }
+  #msg { font-size:14px; font-weight:600; margin:10px 0; min-height:40px; color:#e5e5e5; }
+  #msg.bad { color:#ffb4b4; }
+  #msg.ok { color:#7ee2b8; }
+  .row { display:flex; gap:8px; margin:8px 0; }
+  button { flex:1; min-height:46px; border:0; border-radius:10px; font-weight:700; font-size:15px; color:#fff; background:#444; cursor:pointer; }
+  button.main { background:#EE4D2D; }
+  select { width:100%; min-height:44px; border-radius:10px; border:0; padding:0 10px; font-size:15px; background:#3a3a3a; color:#fff; }
+  #result { font-size:22px; font-weight:800; letter-spacing:.04em; text-align:center; word-break:break-all; margin:8px 0; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Quét mã QR / mã vạch</h1>
+  <div id="reader"></div>
+  <div id="msg">Đang mở camera...</div>
+  <select id="cams" hidden></select>
+  <div class="row">
+    <button id="btnTorch" hidden>Bật đèn</button>
+    <button class="main" id="btnClose">Đóng</button>
+  </div>
+  <div id="result"></div>
+  <div class="row"><button id="btnCopy" hidden>Sao chép mã</button></div>
+</main>
+<script>
+  var LIBS = [
+    'https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js',
+    'https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js',
+    'https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js'
+  ];
+  var qr = null, done = false, torchOn = false;
+  var $ = function(id) { return document.getElementById(id); };
+  function msg(t, cls) { var m = $('msg'); m.textContent = t; m.className = cls || ''; }
+
+  function formats() {
+    var F = Html5QrcodeSupportedFormats;
+    return [F.QR_CODE, F.CODE_128, F.CODE_39, F.CODE_93, F.EAN_13, F.EAN_8, F.UPC_A, F.UPC_E, F.ITF, F.CODABAR, F.DATA_MATRIX, F.PDF_417];
+  }
+
+  function onCode(text) {
+    if (done) return;
+    var code = String(text || '').trim().toUpperCase();
+    if (!code) return;
+    done = true;
+    try { if (navigator.vibrate) navigator.vibrate(80); } catch (e) {}
+    $('result').textContent = code;
+    var sent = false;
+    try {
+      if (window.opener && !window.opener.closed) { window.opener.postMessage({ type: 'QR_SCANNED', code: code }, '*'); sent = true; }
+    } catch (e) {}
+    stop().then(function() {
+      if (sent) { msg('Đã gửi mã về ứng dụng.', 'ok'); setTimeout(function() { window.close(); }, 250); }
+      else {
+        msg('Không gửi tự động được về ứng dụng. Bấm "Sao chép mã", đóng cửa sổ này rồi dán vào ô quét.', 'bad');
+        $('btnCopy').hidden = false;
+      }
+    });
+  }
+
+  function stop() {
+    if (!qr) return Promise.resolve();
+    var q = qr; qr = null;
+    return q.stop().catch(function() {}).then(function() { try { q.clear(); } catch (e) {} });
+  }
+
+  function startWith(cameraId) {
+    qr = new Html5Qrcode('reader', { verbose: false, useBarCodeDetectorIfSupported: true, formatsToSupport: formats() });
+    return qr.start(
+      cameraId || { facingMode: 'environment' },
+      { fps: 12, disableFlip: true,
+        qrbox: function(w, h) { return { width: Math.floor(w * 0.92), height: Math.floor(Math.min(h * 0.6, w * 0.5)) }; },
+        videoConstraints: cameraId ? undefined : { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } } },
+      onCode, function() {}
+    ).then(function() {
+      msg('Đưa mã QR hoặc mã vạch vào khung, giữ máy thẳng và đủ sáng.');
+      try {
+        var caps = qr.getRunningTrackCameraCapabilities();
+        if (caps && caps.torchFeature && caps.torchFeature().isSupported()) $('btnTorch').hidden = false;
+      } catch (e) {}
+    });
+  }
+
+  function init() {
+    startWith(null).catch(function(err) {
+      var s = String((err && err.message) || err);
+      if (/NotAllowed|Permission/i.test(s)) msg('Chưa được cấp quyền camera. Bấm biểu tượng ổ khóa cạnh thanh địa chỉ, chọn Camera → Allow rồi tải lại trang.', 'bad');
+      else if (/NotFound|Requested device/i.test(s)) msg('Thiết bị không có camera.', 'bad');
+      else msg('Không mở được camera: ' + s, 'bad');
+    });
+    // Máy tính có nhiều camera: cho chọn
+    Html5Qrcode.getCameras().then(function(list) {
+      if (list && list.length > 1) {
+        var sel = $('cams');
+        sel.innerHTML = list.map(function(c, i) { return '<option value="' + c.id + '">' + (c.label || ('Camera ' + (i + 1))) + '</option>'; }).join('');
+        sel.hidden = false;
+        sel.onchange = function() { stop().then(function() { return startWith(sel.value); }).catch(function(e) { msg('Không mở được camera này: ' + e, 'bad'); }); };
+      }
+    }).catch(function() {});
+  }
+
+  $('btnClose').onclick = function() { stop().then(function() { window.close(); }); };
+  $('btnTorch').onclick = function() {
+    try {
+      var t = qr.getRunningTrackCameraCapabilities().torchFeature();
+      torchOn = !torchOn; t.apply(torchOn);
+      $('btnTorch').textContent = torchOn ? 'Tắt đèn' : 'Bật đèn';
+    } catch (e) {}
+  };
+  $('btnCopy').onclick = function() {
+    var v = $('result').textContent;
+    if (navigator.clipboard) navigator.clipboard.writeText(v).then(function() { msg('Đã sao chép: ' + v, 'ok'); });
+  };
+
+  (function load(i) {
+    if (window.Html5Qrcode) return init();
+    if (i >= LIBS.length) { msg('Không tải được bộ quét (mạng chặn).', 'bad'); return; }
+    var s = document.createElement('script'); s.src = LIBS[i];
+    s.onload = function() { window.Html5Qrcode ? init() : load(i + 1); };
+    s.onerror = function() { load(i + 1); };
+    document.head.appendChild(s);
+  })(0);
+</script>
+</body>
+</html>
