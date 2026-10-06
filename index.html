@@ -60,6 +60,16 @@
     try {
       if (window.opener && !window.opener.closed) { window.opener.postMessage({ type: 'QR_SCANNED', code: code }, '*'); sent = true; }
     } catch (e) {}
+    var q = new URLSearchParams(location.search);
+    var K = q.get('k'), BACK = q.get('back');
+    if (K && BACK && /^https:\/\/script\.google\.com\//.test(BACK)) {
+      // Cách chắc chắn: mở lại địa chỉ ứng dụng kèm mã, ứng dụng sẽ nhận mã qua máy chủ
+      msg('Đang gửi mã về ứng dụng...', 'ok');
+      stop().then(function() {
+        location.href = BACK + (BACK.indexOf('?') < 0 ? '?' : '&') + 'scanKey=' + encodeURIComponent(K) + '&code=' + encodeURIComponent(code);
+      });
+      return;
+    }
     stop().then(function() {
       if (sent) { msg('Đã gửi mã về ứng dụng.', 'ok'); setTimeout(function() { window.close(); }, 250); }
       else {
