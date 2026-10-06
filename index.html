@@ -25,19 +25,19 @@
   .icon svg { width:22px; height:22px; }
   .icon.on { background:var(--spx); border-color:var(--spx); }
 
-  .stage { position:relative; border-radius:20px; overflow:hidden; background:#000; border:1px solid var(--line); min-height:260px; }
+  .stage { position:relative; border-radius:20px; overflow:hidden; background:#000; border:1px solid var(--line); min-height:260px; isolation:isolate; contain:paint; }
   #reader { width:100%; border:0 !important; }
   #reader video { display:block; width:100% !important; }
   #qr-shaded-region { display:none !important; }
 
-  .frame { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); border-radius:14px; box-shadow:0 0 0 100vmax rgba(0,0,0,.55); pointer-events:none; width:70%; height:45%; }
+  .frame { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); border-radius:14px; box-shadow:inset 0 0 0 1px rgba(255,255,255,.18); pointer-events:none; width:70%; height:45%; }
   .c { position:absolute; width:26px; height:26px; border:4px solid var(--spx); transition:border-color .2s; }
   .tl { left:-2px; top:-2px; border-right:0; border-bottom:0; border-radius:14px 0 0 0; }
   .tr { right:-2px; top:-2px; border-left:0; border-bottom:0; border-radius:0 14px 0 0; }
   .bl { left:-2px; bottom:-2px; border-right:0; border-top:0; border-radius:0 0 0 14px; }
   .br { right:-2px; bottom:-2px; border-left:0; border-top:0; border-radius:0 0 14px 0; }
-  .line { position:absolute; left:8px; right:8px; height:2px; top:8%; border-radius:2px; background:linear-gradient(90deg, transparent, var(--spx), transparent); box-shadow:0 0 12px 2px rgba(238,77,45,.55); animation:sweep 1.9s ease-in-out infinite alternate; }
-  @keyframes sweep { to { top:92%; } }
+  .line { position:absolute; left:8px; right:8px; height:2px; top:0; transform:translateY(8px); border-radius:2px; background:linear-gradient(90deg, transparent, var(--spx), transparent); box-shadow:0 0 8px 1px rgba(238,77,45,.5); will-change:transform; animation:sweep 1.9s ease-in-out infinite alternate; }
+  @keyframes sweep { to { transform:translateY(calc(var(--fh,200px) - 10px)); } }
   .check { position:absolute; inset:0; display:none; place-items:center; }
   .check svg { width:64px; height:64px; padding:14px; border-radius:50%; background:var(--ok); color:#06281c; animation:pop .28s cubic-bezier(.2,1.4,.4,1); }
   @keyframes pop { from { transform:scale(.4); opacity:0; } to { transform:scale(1); opacity:1; } }
@@ -51,7 +51,7 @@
   #result { text-align:center; font-size:26px; font-weight:800; letter-spacing:.05em; word-break:break-all; min-height:34px; }
   .tools { display:flex; justify-content:center; gap:12px; flex-wrap:wrap; }
   .pill { min-height:46px; padding:0 22px; border-radius:23px; border:1px solid var(--line); background:var(--panel); color:var(--text); font:700 14px "Be Vietnam Pro", sans-serif; cursor:pointer; }
-  @media (prefers-reduced-motion: reduce) { .line { animation:none; top:50%; } .check svg { animation:none; } }
+  @media (prefers-reduced-motion: reduce) { .line { animation:none; transform:translateY(50px); } .check svg { animation:none; } }
 </style>
 </head>
 <body>
@@ -142,207 +142,7 @@
       { fps: 12, disableFlip: true,
         qrbox: function(w, h) {
           var bw = Math.floor(w * 0.88), bh = Math.floor(Math.min(h * 0.62, w * 0.5));
-          var f = $('frame'); f.style.width = bw + 'px'; f.style.height = bh + 'px';
-          return { width: bw, height: bh };
-        },
-        videoConstraints: cameraId ? undefined : { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } } },
-      onCode, function() {}
-    ).then(function() {
-      msg('Đưa mã vào khung, giữ máy thẳng');
-      try {
-        var caps = qr.getRunningTrackCameraCapabilities();
-        if (caps && caps.torchFeature && caps.torchFeature().isSupported()) $('btnTorch').hidden = false;
-      } catch (e) {}
-    });
-  }
-
-  function explain(err) {
-    var s = String((err && err.message) || err);
-    if (/NotAllowed|Permission/i.test(s)) return 'Chưa có quyền camera. Bấm ổ khóa cạnh thanh địa chỉ, chọn Camera → Allow rồi tải lại.';
-    if (/NotFound|Requested device/i.test(s)) return 'Thiết bị không có camera.';
-    return 'Không mở được camera: ' + s;
-  }
-
-  function init() {
-    startWith(null).catch(function(err) { msg(explain(err), 'bad'); $('frame').style.display = 'none'; });
-    Html5Qrcode.getCameras().then(function(list) {
-      if (list && list.length > 1) { cams = list; $('btnFlip').hidden = false; }
-    }).catch(function() {});
-  }
-
-  $('btnClose').onclick = function() { stop().then(function() { window.close(); }); };
-  $('btnTorch').onclick = function() {
-    try {
-      var t = qr.getRunningTrackCameraCapabilities().torchFeature();
-      torchOn = !torchOn; t.apply(torchOn);
-      $('btnTorch').classList.toggle('on', torchOn);
-    } catch (e) {}
-  };
-  $('btnFlip').onclick = function() {
-    if (!cams.length) return;
-    camIdx = (camIdx + 1) % cams.length; torchOn = false; $('btnTorch').classList.remove('on'); $('btnTorch').hidden = true;
-    stop().then(function() { return startWith(cams[camIdx].id); }).catch(function(e) { msg(explain(e), 'bad'); });
-  };
-  $('btnCopy').onclick = function() {
-    var v = $('result').textContent;
-    if (navigator.clipboard) navigator.clipboard.writeText(v).then(function() { msg('Đã sao chép ' + v, 'ok'); });
-  };
-
-  (function load(i) {
-    if (window.Html5Qrcode) return init();
-    if (i >= LIBS.length) { msg('Không tải được bộ quét (mạng chặn).', 'bad'); return; }
-    var s = document.createElement('script'); s.src = LIBS[i];
-    s.onload = function() { window.Html5Qrcode ? init() : load(i + 1); };
-    s.onerror = function() { load(i + 1); };
-    document.head.appendChild(s);
-  })(0);
-</script>
-</body>
-</html><!DOCTYPE html>
-<html lang="vi">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<meta name="theme-color" content="#1b1918">
-<title>Quét mã</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@500;600;700;800&display=swap" rel="stylesheet">
-<style>
-  :root { --spx:#EE4D2D; --bg:#1b1918; --panel:#262321; --line:#3a3532; --text:#f4efed; --muted:#a39b97; --ok:#34d399; --bad:#ff8fa3; }
-  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
-  html, body { height:100%; }
-  body { margin:0; background:var(--bg); color:var(--text); font-family:"Be Vietnam Pro", system-ui, -apple-system, "Segoe UI", sans-serif; }
-  .app { min-height:100%; max-width:460px; margin:0 auto; padding:max(12px, env(safe-area-inset-top)) 14px max(14px, env(safe-area-inset-bottom)); display:flex; flex-direction:column; gap:12px; }
-
-  header { display:flex; align-items:center; justify-content:space-between; gap:10px; }
-  .brand { display:flex; align-items:center; gap:10px; min-width:0; }
-  .badge { width:34px; height:34px; border-radius:10px; background:var(--spx); display:grid; place-items:center; flex-shrink:0; }
-  .badge svg { width:20px; height:20px; }
-  .brand b { display:block; font-size:16px; font-weight:800; line-height:1.2; }
-  .brand small { display:block; font-size:12px; color:var(--muted); font-weight:600; }
-  .icon { width:46px; height:46px; border-radius:50%; border:1px solid var(--line); background:var(--panel); color:var(--text); display:grid; place-items:center; cursor:pointer; flex-shrink:0; transition:transform .08s, background .15s; }
-  .icon:active { transform:scale(.94); }
-  .icon svg { width:22px; height:22px; }
-  .icon.on { background:var(--spx); border-color:var(--spx); }
-
-  .stage { position:relative; border-radius:20px; overflow:hidden; background:#000; border:1px solid var(--line); min-height:260px; }
-  #reader { width:100%; border:0 !important; }
-  #reader video { display:block; width:100% !important; }
-  #qr-shaded-region { display:none !important; }
-
-  .frame { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); border-radius:14px; box-shadow:0 0 0 100vmax rgba(0,0,0,.55); pointer-events:none; width:70%; height:45%; }
-  .c { position:absolute; width:26px; height:26px; border:4px solid var(--spx); transition:border-color .2s; }
-  .tl { left:-2px; top:-2px; border-right:0; border-bottom:0; border-radius:14px 0 0 0; }
-  .tr { right:-2px; top:-2px; border-left:0; border-bottom:0; border-radius:0 14px 0 0; }
-  .bl { left:-2px; bottom:-2px; border-right:0; border-top:0; border-radius:0 0 0 14px; }
-  .br { right:-2px; bottom:-2px; border-left:0; border-top:0; border-radius:0 0 14px 0; }
-  .line { position:absolute; left:8px; right:8px; height:2px; top:8%; border-radius:2px; background:linear-gradient(90deg, transparent, var(--spx), transparent); box-shadow:0 0 12px 2px rgba(238,77,45,.55); animation:sweep 1.9s ease-in-out infinite alternate; }
-  @keyframes sweep { to { top:92%; } }
-  .check { position:absolute; inset:0; display:none; place-items:center; }
-  .check svg { width:64px; height:64px; padding:14px; border-radius:50%; background:var(--ok); color:#06281c; animation:pop .28s cubic-bezier(.2,1.4,.4,1); }
-  @keyframes pop { from { transform:scale(.4); opacity:0; } to { transform:scale(1); opacity:1; } }
-  .frame.done .c { border-color:var(--ok); }
-  .frame.done .line { display:none; }
-  .frame.done .check { display:grid; }
-
-  .status { display:flex; align-items:center; justify-content:center; gap:8px; min-height:44px; padding:8px 14px; border-radius:12px; background:var(--panel); border:1px solid var(--line); font-size:14px; font-weight:600; color:var(--text); text-align:center; }
-  .status.bad { color:var(--bad); border-color:#5a2a35; }
-  .status.ok { color:var(--ok); border-color:#1f5c47; }
-  #result { text-align:center; font-size:26px; font-weight:800; letter-spacing:.05em; word-break:break-all; min-height:34px; }
-  .tools { display:flex; justify-content:center; gap:12px; flex-wrap:wrap; }
-  .pill { min-height:46px; padding:0 22px; border-radius:23px; border:1px solid var(--line); background:var(--panel); color:var(--text); font:700 14px "Be Vietnam Pro", sans-serif; cursor:pointer; }
-  @media (prefers-reduced-motion: reduce) { .line { animation:none; top:50%; } .check svg { animation:none; } }
-</style>
-</head>
-<body>
-<div class="app">
-  <header>
-    <div class="brand">
-      <span class="badge"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2"/><path d="M8 12h8"/></svg></span>
-      <div><b id="title">Quét mã</b><small>HCM Mega SOC</small></div>
-    </div>
-    <button class="icon" id="btnClose" aria-label="Đóng"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
-  </header>
-
-  <div class="stage">
-    <div id="reader"></div>
-    <div class="frame" id="frame">
-      <i class="c tl"></i><i class="c tr"></i><i class="c bl"></i><i class="c br"></i>
-      <span class="line"></span>
-      <div class="check"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></div>
-    </div>
-  </div>
-
-  <div class="status" id="msg" role="status" aria-live="polite">Đang mở camera...</div>
-  <div id="result"></div>
-
-  <div class="tools">
-    <button class="icon" id="btnTorch" hidden aria-label="Bật đèn"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M13 2L5 14h5l-1 8 8-12h-5z"/></svg></button>
-    <button class="icon" id="btnFlip" hidden aria-label="Đổi camera"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h13l-3-3M21 17H8l3 3"/></svg></button>
-    <button class="pill" id="btnCopy" hidden>Sao chép mã</button>
-  </div>
-</div>
-
-<script>
-  var LIBS = [
-    'https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js',
-    'https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js',
-    'https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js'
-  ];
-  var TITLES = { stationEmp: 'Quét mã OPS / nhân viên', stationBorrow: 'Quét mã tài sản', pdaHistory: 'Quét để xem lịch sử', trSn: 'Quét SN vào phiếu' };
-  var params = new URLSearchParams(location.search);
-  var qr = null, done = false, torchOn = false, cams = [], camIdx = -1;
-  var $ = function(id) { return document.getElementById(id); };
-  function msg(t, cls) { var m = $('msg'); m.textContent = t; m.className = 'status' + (cls ? ' ' + cls : ''); }
-  $('title').textContent = TITLES[params.get('t')] || 'Quét mã';
-
-  function formats() {
-    var F = Html5QrcodeSupportedFormats;
-    return [F.QR_CODE, F.CODE_128, F.CODE_39, F.CODE_93, F.EAN_13, F.EAN_8, F.UPC_A, F.UPC_E, F.ITF, F.CODABAR, F.DATA_MATRIX, F.PDF_417];
-  }
-
-  function onCode(text) {
-    if (done) return;
-    var code = String(text || '').trim().toUpperCase();
-    if (!code) return;
-    done = true;
-    try { if (navigator.vibrate) navigator.vibrate(80); } catch (e) {}
-    $('frame').classList.add('done');
-    $('result').textContent = code;
-    var sent = false;
-    try {
-      if (window.opener && !window.opener.closed) { window.opener.postMessage({ type: 'QR_SCANNED', code: code }, '*'); sent = true; }
-    } catch (e) {}
-    var K = params.get('k'), BACK = params.get('back');
-    if (K && BACK && /^https:\/\/script\.google\.com\//.test(BACK)) {
-      msg('Đã quét, đang gửi về ứng dụng...', 'ok');
-      stop().then(function() {
-        setTimeout(function() {
-          location.href = BACK + (BACK.indexOf('?') < 0 ? '?' : '&') + 'scanKey=' + encodeURIComponent(K) + '&code=' + encodeURIComponent(code);
-        }, 350);
-      });
-      return;
-    }
-    stop().then(function() {
-      if (sent) { msg('Đã gửi mã về ứng dụng', 'ok'); setTimeout(function() { window.close(); }, 350); }
-      else { msg('Không gửi tự động được. Sao chép mã rồi dán vào ô quét.', 'bad'); $('btnCopy').hidden = false; }
-    });
-  }
-
-  function stop() {
-    if (!qr) return Promise.resolve();
-    var q = qr; qr = null;
-    return q.stop().catch(function() {}).then(function() { try { q.clear(); } catch (e) {} });
-  }
-
-  function startWith(cameraId) {
-    qr = new Html5Qrcode('reader', { verbose: false, useBarCodeDetectorIfSupported: true, formatsToSupport: formats() });
-    return qr.start(
-      cameraId || { facingMode: 'environment' },
-      { fps: 12, disableFlip: true,
-        qrbox: function(w, h) {
-          var bw = Math.floor(w * 0.88), bh = Math.floor(Math.min(h * 0.62, w * 0.5));
-          var f = $('frame'); f.style.width = bw + 'px'; f.style.height = bh + 'px';
+          var f = $('frame'); f.style.width = bw + 'px'; f.style.height = bh + 'px'; f.style.setProperty('--fh', bh + 'px');
           return { width: bw, height: bh };
         },
         videoConstraints: cameraId ? undefined : { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } } },
