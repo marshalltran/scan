@@ -36,14 +36,11 @@
   .tr { right:-2px; top:-2px; border-left:0; border-bottom:0; border-radius:0 14px 0 0; }
   .bl { left:-2px; bottom:-2px; border-right:0; border-top:0; border-radius:0 0 0 14px; }
   .br { right:-2px; bottom:-2px; border-left:0; border-top:0; border-radius:0 0 14px 0; }
-  .line { position:absolute; left:8px; right:8px; height:2px; top:0; transform:translateY(8px); border-radius:2px; background:linear-gradient(90deg, transparent, var(--spx), transparent); box-shadow:0 0 8px 1px rgba(238,77,45,.5); will-change:transform; animation:sweep 1.9s ease-in-out infinite alternate; }
-  @keyframes sweep { to { transform:translateY(calc(var(--fh,200px) - 10px)); } }
   .check { position:absolute; inset:0; display:none; place-items:center; }
   .check svg { width:64px; height:64px; padding:14px; border-radius:50%; background:var(--ok); color:#06281c; animation:pop .28s cubic-bezier(.2,1.4,.4,1); }
   @keyframes pop { from { transform:scale(.4); opacity:0; } to { transform:scale(1); opacity:1; } }
   .frame.done .c { border-color:var(--ok); }
-  .frame.done .line { display:none; }
-  .frame.done .check { display:grid; }
+    .frame.done .check { display:grid; }
 
   .status { display:flex; align-items:center; justify-content:center; gap:8px; min-height:44px; padding:8px 14px; border-radius:12px; background:var(--panel); border:1px solid var(--line); font-size:14px; font-weight:600; color:var(--text); text-align:center; }
   .status.bad { color:var(--bad); border-color:#5a2a35; }
@@ -51,7 +48,7 @@
   #result { text-align:center; font-size:26px; font-weight:800; letter-spacing:.05em; word-break:break-all; min-height:34px; }
   .tools { display:flex; justify-content:center; gap:12px; flex-wrap:wrap; }
   .pill { min-height:46px; padding:0 22px; border-radius:23px; border:1px solid var(--line); background:var(--panel); color:var(--text); font:700 14px "Be Vietnam Pro", sans-serif; cursor:pointer; }
-  @media (prefers-reduced-motion: reduce) { .line { animation:none; transform:translateY(50px); } .check svg { animation:none; } }
+  @media (prefers-reduced-motion: reduce) { .check svg { animation:none; } }
 </style>
 </head>
 <body>
@@ -68,7 +65,6 @@
     <div id="reader"></div>
     <div class="frame" id="frame">
       <i class="c tl"></i><i class="c tr"></i><i class="c bl"></i><i class="c br"></i>
-      <span class="line"></span>
       <div class="check"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></div>
     </div>
   </div>
@@ -77,6 +73,7 @@
   <div id="result"></div>
 
   <div class="tools">
+    <button class="icon" id="btnZoom" hidden aria-label="Phóng to" style="font:800 14px 'Be Vietnam Pro',sans-serif">1x</button>
     <button class="icon" id="btnTorch" hidden aria-label="Bật đèn"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M13 2L5 14h5l-1 8 8-12h-5z"/></svg></button>
     <button class="icon" id="btnFlip" hidden aria-label="Đổi camera"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h13l-3-3M21 17H8l3 3"/></svg></button>
     <button class="pill" id="btnCopy" hidden>Sao chép mã</button>
@@ -135,23 +132,33 @@
     return q.stop().catch(function() {}).then(function() { try { q.clear(); } catch (e) {} });
   }
 
+  var zoomMax = 1, zoomMin = 1, zoomCur = 1;
   function startWith(cameraId) {
+    zoomCur = 1; $('btnZoom').hidden = true; $('btnZoom').textContent = '1x';
     qr = new Html5Qrcode('reader', { verbose: false, useBarCodeDetectorIfSupported: true, formatsToSupport: formats() });
     return qr.start(
       cameraId || { facingMode: 'environment' },
-      { fps: 12, disableFlip: true,
+      { fps: 20, disableFlip: true,
         qrbox: function(w, h) {
-          var bw = Math.floor(w * 0.88), bh = Math.floor(Math.min(h * 0.62, w * 0.5));
+          var bw = Math.floor(w * 0.92), bh = Math.floor(Math.min(h * 0.75, w * 0.62));
           var f = $('frame'); f.style.width = bw + 'px'; f.style.height = bh + 'px'; f.style.setProperty('--fh', bh + 'px');
           return { width: bw, height: bh };
         },
-        videoConstraints: cameraId ? undefined : { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } } },
+        videoConstraints: cameraId ? undefined : { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 }, advanced: [{ focusMode: 'continuous' }] } },
       onCode, function() {}
     ).then(function() {
       msg('Đưa mã vào khung, giữ máy thẳng');
       try {
         var caps = qr.getRunningTrackCameraCapabilities();
         if (caps && caps.torchFeature && caps.torchFeature().isSupported()) $('btnTorch').hidden = false;
+      } catch (e) {}
+      try {
+        var track = qr.getRunningTrackCapabilities ? qr.getRunningTrackCapabilities() : null;
+        if (track && track.focusMode && track.focusMode.indexOf('continuous') >= 0) qr.applyVideoConstraints({ advanced: [{ focusMode: 'continuous' }] }).catch(function() {});
+        if (track && track.zoom && track.zoom.max > 1.2) {
+          zoomMax = Math.min(track.zoom.max, 4); zoomMin = track.zoom.min || 1;
+          $('btnZoom').hidden = false;
+        }
       } catch (e) {}
     });
   }
@@ -170,6 +177,12 @@
     }).catch(function() {});
   }
 
+  $('btnZoom').onclick = function() {
+    var steps = [1, 2, 3, 4].filter(function(v) { return v >= zoomMin && v <= zoomMax; });
+    var i = steps.indexOf(zoomCur); zoomCur = steps[(i + 1) % steps.length] || 1;
+    try { qr.applyVideoConstraints({ advanced: [{ zoom: zoomCur }] }); } catch (e) {}
+    $('btnZoom').textContent = zoomCur + 'x';
+  };
   $('btnClose').onclick = function() { stop().then(function() { window.close(); }); };
   $('btnTorch').onclick = function() {
     try {
