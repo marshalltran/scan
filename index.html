@@ -86,7 +86,7 @@
     'https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js',
     'https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js'
   ];
-  var TITLES = { stationEmp: 'Quét mã OPS / nhân viên', stationBorrow: 'Quét mã tài sản', pdaHistory: 'Quét để xem lịch sử', trSn: 'Quét SN vào phiếu' };
+  var TITLES = { stationEmp: 'Quét mã OPS / nhân viên', stationBorrow: 'Quét mã tài sản', pdaHistory: 'Quét để xem lịch sử', trSn: 'Quét SN vào phiếu', devSn: 'Quét SN tài sản mới' };
   var params = new URLSearchParams(location.search);
   var qr = null, done = false, torchOn = false, cams = [], camIdx = -1;
   var $ = function(id) { return document.getElementById(id); };
@@ -133,18 +133,18 @@
   }
 
   var zoomMax = 1, zoomMin = 1, zoomCur = 1;
-  function startWith(cameraId) {
+  function startWith(cameraId, lite) {
     zoomCur = 1; $('btnZoom').hidden = true; $('btnZoom').textContent = '1x';
     qr = new Html5Qrcode('reader', { verbose: false, useBarCodeDetectorIfSupported: true, formatsToSupport: formats() });
     return qr.start(
       cameraId || { facingMode: 'environment' },
-      { fps: 20, disableFlip: true,
+      { fps: lite ? 10 : 20, disableFlip: true,
         qrbox: function(w, h) {
           var bw = Math.floor(w * 0.92), bh = Math.floor(Math.min(h * 0.75, w * 0.62));
           var f = $('frame'); f.style.width = bw + 'px'; f.style.height = bh + 'px'; f.style.setProperty('--fh', bh + 'px');
           return { width: bw, height: bh };
         },
-        videoConstraints: cameraId ? undefined : { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 }, advanced: [{ focusMode: 'continuous' }] } },
+        videoConstraints: (cameraId || lite) ? undefined : { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 }, advanced: [{ focusMode: 'continuous' }] } },
       onCode, function() {}
     ).then(function() {
       msg('Đưa mã vào khung, giữ máy thẳng');
@@ -166,12 +166,28 @@
   function explain(err) {
     var s = String((err && err.message) || err);
     if (/NotAllowed|Permission/i.test(s)) return 'Chưa có quyền camera. Bấm ổ khóa cạnh thanh địa chỉ, chọn Camera → Allow rồi tải lại.';
+    if (/NotReadable|Could not start video source|TrackStart/i.test(s)) return 'Camera đang bị app khác giữ hoặc máy không cho trình duyệt dùng. Đóng app Camera, các tab Chrome khác đang dùng camera (kể cả cửa sổ chụp ảnh), tắt đầu quét / DataWedge dùng camera, rồi mở lại.';
     if (/NotFound|Requested device/i.test(s)) return 'Thiết bị không có camera.';
     return 'Không mở được camera: ' + s;
   }
 
   function init() {
-    startWith(null).catch(function(err) { msg(explain(err), 'bad'); $('frame').style.display = 'none'; });
+    // Máy PDA / điện thoại yếu hay lỗi "Could not start video source" khi xin độ phân giải cao:
+    // thử lần lượt: cấu hình đầy đủ -> cấu hình nhẹ (không ép độ phân giải) -> từng camera trong máy
+    function tryEachCamera() {
+      return Html5Qrcode.getCameras().then(function(list) {
+        cams = list || [];
+        var p = Promise.reject(new Error('NotFound'));
+        cams.forEach(function(c, i) {
+          p = p.catch(function() { return stop().then(function() { camIdx = i; return startWith(c.id, true); }); });
+        });
+        return p;
+      });
+    }
+    startWith(null, false)
+      .catch(function() { return stop().then(function() { return startWith(null, true); }); })
+      .catch(function() { return stop().then(tryEachCamera); })
+      .catch(function(err) { msg(explain(err), 'bad'); $('frame').style.display = 'none'; });
     Html5Qrcode.getCameras().then(function(list) {
       if (list && list.length > 1) { cams = list; $('btnFlip').hidden = false; }
     }).catch(function() {});
