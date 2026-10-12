@@ -26,8 +26,11 @@
   .icon.on { background:var(--spx); border-color:var(--spx); }
 
   .stage { position:relative; border-radius:20px; overflow:hidden; background:#000; border:1px solid var(--line); min-height:260px; isolation:isolate; contain:paint; }
+  .stage { display:flex; justify-content:center; align-items:center; }
   #reader { width:100%; border:0 !important; }
-  #reader video { display:block; width:100% !important; }
+  #reader video { display:block; margin:0 auto; width:auto !important; height:auto; max-width:100%; max-height:calc(100vh - 230px); max-height:calc(100dvh - 230px); }
+  .stage .tools { position:absolute; left:0; right:0; bottom:10px; z-index:5; gap:14px; }
+  .stage .tools .icon { background:rgba(27,25,24,.72); border-color:rgba(255,255,255,.25); backdrop-filter:blur(4px); }
   #qr-shaded-region { display:none !important; }
 
   .frame { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); border-radius:14px; box-shadow:inset 0 0 0 1px rgba(255,255,255,.18); pointer-events:none; width:70%; height:45%; }
@@ -67,17 +70,17 @@
       <i class="c tl"></i><i class="c tr"></i><i class="c bl"></i><i class="c br"></i>
       <div class="check"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></div>
     </div>
-  </div>
-
-  <div class="status" id="msg" role="status" aria-live="polite">Đang mở camera...</div>
-  <div id="result"></div>
-
   <div class="tools">
     <button class="icon" id="btnZoom" hidden aria-label="Phóng to" style="font:800 14px 'Be Vietnam Pro',sans-serif">1x</button>
     <button class="icon" id="btnTorch" hidden aria-label="Bật đèn"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M13 2L5 14h5l-1 8 8-12h-5z"/></svg></button>
     <button class="icon" id="btnFlip" hidden aria-label="Đổi camera"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h13l-3-3M21 17H8l3 3"/></svg></button>
     <button class="pill" id="btnCopy" hidden>Sao chép mã</button>
   </div>
+  </div>
+
+  <div class="status" id="msg" role="status" aria-live="polite">Đang mở camera...</div>
+  <div id="result"></div>
+
 </div>
 
 <script>
@@ -230,11 +233,31 @@
       $('btnTorch').classList.toggle('on', torchOn);
     } catch (e) {}
   };
-  $('btnFlip').onclick = function() {
-    if (!cams.length) return;
-    camIdx = (camIdx + 1) % cams.length; torchOn = false; $('btnTorch').classList.remove('on'); $('btnTorch').hidden = true;
-    stop().then(function() { return startWith(cams[camIdx].id); }).catch(function(e) { msg(explain(e), 'bad'); });
-  };
+  // Đổi camera: bỏ qua camera cho hình đen (máy PDA có camera phụ/hồng ngoại/độ sâu, bấm vào chỉ thấy màn đen)
+  var blackCams = {};
+  function frameIsBlack() {
+    try {
+      var v = document.querySelector('#reader video');
+      if (!v || !v.videoWidth) return true;
+      var c = document.createElement('canvas'); c.width = 24; c.height = 24;
+      var x = c.getContext('2d'); x.drawImage(v, 0, 0, 24, 24);
+      var d = x.getImageData(0, 0, 24, 24).data, sum = 0, n = 0;
+      for (var i = 0; i < d.length; i += 4) { sum += d[i] + d[i + 1] + d[i + 2]; n += 3; }
+      return (sum / n) < 6;
+    } catch (e) { return false; }
+  }
+  function flipTo(tries) {
+    if (!cams.length || tries >= cams.length) { msg('Không có camera nào khác dùng được.', 'bad'); return Promise.resolve(); }
+    do { camIdx = (camIdx + 1) % cams.length; } while (blackCams[cams[camIdx].id] && ++tries < cams.length);
+    var id = cams[camIdx].id;
+    torchOn = false; $('btnTorch').classList.remove('on'); $('btnTorch').hidden = true;
+    return stop().then(function() { return startWith(id, true); }).then(function() {
+      return new Promise(function(res) { setTimeout(res, 1100); });
+    }).then(function() {
+      if (qr && frameIsBlack()) { blackCams[id] = true; return flipTo(tries + 1); }
+    }).catch(function(e) { blackCams[id] = true; if (tries + 1 < cams.length) return stop().then(function() { return flipTo(tries + 1); }); msg(explain(e), 'bad'); });
+  }
+  $('btnFlip').onclick = function() { flipTo(0); };
   $('btnCopy').onclick = function() {
     var v = $('result').textContent;
     if (navigator.clipboard) navigator.clipboard.writeText(v).then(function() { msg('Đã sao chép ' + v, 'ok'); });
