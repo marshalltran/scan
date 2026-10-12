@@ -148,6 +148,7 @@
       onCode, function() {}
     ).then(function() {
       msg('Đưa mã vào khung, giữ máy thẳng');
+      ensureBack();
       try {
         var caps = qr.getRunningTrackCameraCapabilities();
         if (caps && caps.torchFeature && caps.torchFeature().isSupported()) $('btnTorch').hidden = false;
@@ -171,12 +172,34 @@
     return 'Không mở được camera: ' + s;
   }
 
+  // Máy PDA nhiều khi không báo facingMode, trình duyệt mở camera trước. Xếp camera sau (nhãn back/rear/environment/sau) lên đầu, camera trước (front/user/trước) xuống cuối.
+  function isFront(c) { return /front|user|selfie|trước|truoc/i.test(String(c.label || '')); }
+  function isBack(c) { return /back|rear|environment|world|sau/i.test(String(c.label || '')) && !isFront(c); }
+  function orderCams(list) {
+    var a = (list || []).slice();
+    var rank = function(c) { return isBack(c) ? 0 : (isFront(c) ? 2 : 1); };
+    return a.map(function(c, i) { return { c: c, i: i }; }).sort(function(x, y) { return rank(x.c) - rank(y.c) || x.i - y.i; }).map(function(o) { return o.c; });
+  }
+  // Mở xong mà vẫn là camera trước thì đổi sang camera sau (nếu có)
+  function ensureBack() {
+    try {
+      var st = qr && qr.getRunningTrackSettings ? qr.getRunningTrackSettings() : null;
+      if (st && st.facingMode === 'user' && !ensureBack.done) {
+        ensureBack.done = true;
+        Html5Qrcode.getCameras().then(function(list) {
+          var ord = orderCams(list);
+          if (ord.length > 1 && !isFront(ord[0])) { cams = ord; camIdx = 0; stop().then(function() { return startWith(cams[0].id, true); }).catch(function(e) { msg(explain(e), 'bad'); }); }
+        }).catch(function() {});
+      }
+    } catch (e) {}
+  }
+
   function init() {
     // Máy PDA / điện thoại yếu hay lỗi "Could not start video source" khi xin độ phân giải cao:
     // thử lần lượt: cấu hình đầy đủ -> cấu hình nhẹ (không ép độ phân giải) -> từng camera trong máy
     function tryEachCamera() {
       return Html5Qrcode.getCameras().then(function(list) {
-        cams = list || [];
+        cams = orderCams(list);
         var p = Promise.reject(new Error('NotFound'));
         cams.forEach(function(c, i) {
           p = p.catch(function() { return stop().then(function() { camIdx = i; return startWith(c.id, true); }); });
@@ -189,7 +212,7 @@
       .catch(function() { return stop().then(tryEachCamera); })
       .catch(function(err) { msg(explain(err), 'bad'); $('frame').style.display = 'none'; });
     Html5Qrcode.getCameras().then(function(list) {
-      if (list && list.length > 1) { cams = list; $('btnFlip').hidden = false; }
+      if (list && list.length > 1) { cams = orderCams(list); camIdx = 0; $('btnFlip').hidden = false; }
     }).catch(function() {});
   }
 
