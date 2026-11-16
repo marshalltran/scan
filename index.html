@@ -138,6 +138,36 @@
   function unlockSound() { var a = audio(); if (a && a.state !== 'running') a.resume().then(function() { $('btnSnd').hidden = true; }).catch(function() {}); else $('btnSnd').hidden = true; }
   ['touchstart', 'pointerdown'].forEach(function(ev) { document.addEventListener(ev, unlockSound, { passive: true }); });
 
+  // Gửi mã về app qua cửa sổ đã mở trang này, app trả lời "đã nhận" thì đóng tab ngay (không phải mở lại địa chỉ app).
+  // Không có trả lời trong ~1 giây thì gửi qua máy chủ như cũ.
+  function sendViaOpener(list) {
+    return new Promise(function(res) {
+      var op = null; try { op = window.opener && !window.opener.closed ? window.opener : null; } catch (e) {}
+      if (!op) return res(false);
+      var id = 'b' + Date.now(), t = setTimeout(function() { window.removeEventListener('message', on); res(false); }, 1000);
+      function on(ev) { if (ev.data && ev.data.type === 'QR_ACK' && ev.data.id === id) { clearTimeout(t); window.removeEventListener('message', on); res(true); } }
+      window.addEventListener('message', on);
+      try { op.postMessage({ type: 'QR_BATCH', id: id, codes: list }, '*'); } catch (e) { clearTimeout(t); window.removeEventListener('message', on); res(false); }
+    });
+  }
+  function closeTab(note) {
+    try { window.close(); } catch (e) {}
+    setTimeout(function() { msg(note || 'Đã gửi. Đóng tab này để quay lại ứng dụng.', 'ok'); }, 400);
+  }
+  function sendBack(list) {
+    var K = params.get('k'), BACK = params.get('back');
+    return stop().then(function() { return sendViaOpener(list); }).then(function(ok) {
+      if (ok) { closeTab(); return; }
+      if (K && BACK && /^https:\/\/script\.google\.com\//.test(BACK)) {
+        // replace: không để lại trang quét trong lịch sử, trình duyệt mới cho tự đóng tab
+        location.replace(BACK + (BACK.indexOf('?') < 0 ? '?' : '&') + 'scanKey=' + encodeURIComponent(K) + '&code=' + encodeURIComponent(list.join(',')));
+        return;
+      }
+      $('result').textContent = list.join(', ');
+      msg('Không gửi tự động được. Sao chép mã rồi dán vào ô quét.', 'bad'); $('btnCopy').hidden = false;
+    });
+  }
+
   // Quét liên tục: camera mở suốt, mỗi mã mới bíp 1 tiếng và vào danh sách; bấm Xong gửi cả danh sách về ứng dụng
   function onMulti(code) {
     var now = Date.now();
@@ -162,20 +192,10 @@
   }
   function finishMulti() {
     if (!codes.length) { stop().then(function() { window.close(); }); return; }
-    var list = codes.slice().reverse(), K = params.get('k'), BACK = params.get('back');
+    var list = codes.slice().reverse();
     $('btnDone').disabled = true;
-    if (K && BACK && /^https:\/\/script\.google\.com\//.test(BACK)) {
-      msg('Đang gửi ' + list.length + ' mã về ứng dụng...', 'ok');
-      stop().then(function() {
-        location.href = BACK + (BACK.indexOf('?') < 0 ? '?' : '&') + 'scanKey=' + encodeURIComponent(K) + '&code=' + encodeURIComponent(list.join(','));
-      });
-      return;
-    }
-    stop().then(function() {
-      if (window.opener && !window.opener.closed) { window.close(); return; }
-      $('result').textContent = list.join(', ');
-      msg('Không gửi tự động được. Sao chép mã rồi dán vào ô quét.', 'bad'); $('btnCopy').hidden = false;
-    });
+    msg('Đang gửi ' + list.length + ' mã về ứng dụng...', 'ok');
+    sendBack(list);
   }
   if (MULTI) {
     document.body.classList.add('multi'); $('mbox').hidden = false;
@@ -194,24 +214,8 @@
     try { if (navigator.vibrate) navigator.vibrate(80); } catch (e) {}
     $('frame').classList.add('done');
     $('result').textContent = code;
-    var sent = false;
-    try {
-      if (window.opener && !window.opener.closed) { window.opener.postMessage({ type: 'QR_SCANNED', code: code }, '*'); sent = true; }
-    } catch (e) {}
-    var K = params.get('k'), BACK = params.get('back');
-    if (K && BACK && /^https:\/\/script\.google\.com\//.test(BACK)) {
-      msg('Đã quét, đang gửi về ứng dụng...', 'ok');
-      stop().then(function() {
-        setTimeout(function() {
-          location.href = BACK + (BACK.indexOf('?') < 0 ? '?' : '&') + 'scanKey=' + encodeURIComponent(K) + '&code=' + encodeURIComponent(code);
-        }, 350);
-      });
-      return;
-    }
-    stop().then(function() {
-      if (sent) { msg('Đã gửi mã về ứng dụng', 'ok'); setTimeout(function() { window.close(); }, 350); }
-      else { msg('Không gửi tự động được. Sao chép mã rồi dán vào ô quét.', 'bad'); $('btnCopy').hidden = false; }
-    });
+    msg('Đã quét, đang gửi về ứng dụng...', 'ok');
+    sendBack([code]);
   }
 
   function stop() {
