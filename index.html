@@ -154,7 +154,18 @@
     try { window.close(); } catch (e) {}
     setTimeout(function() { msg(note || 'Đã gửi. Đóng tab này để quay lại ứng dụng.', 'ok'); }, 400);
   }
+  // Mở trên cùng tab với Tool (điện thoại): gửi xong là mở lại Tool luôn, không thông báo
+  var TOP = params.get('r') === 'top';
+  function backToApp(list) {
+    var K = params.get('k'), BACK = params.get('back');
+    if (!(BACK && /^https:\/\/script\.google\.com\//.test(BACK))) return false;
+    stop().then(function() {
+      location.replace(BACK + (BACK.indexOf('?') < 0 ? '?' : '&') + 'ret=1&scanKey=' + encodeURIComponent(K || '') + (list.length ? '&code=' + encodeURIComponent(list.join(',')) : ''));
+    });
+    return true;
+  }
   function sendBack(list) {
+    if (TOP && backToApp(list)) return Promise.resolve();
     var K = params.get('k'), BACK = params.get('back');
     return stop().then(function() { return sendViaOpener(list); }).then(function(ok) {
       if (ok) { closeTab(); return; }
@@ -188,13 +199,13 @@
     $('cnt').textContent = codes.length;
     $('mlist').innerHTML = codes.map(function(c) { return '<span>' + c.replace(/[&<>]/g, '') + '</span>'; }).join('');
     $('btnDone').disabled = !codes.length;
-    $('btnDone').textContent = codes.length ? 'Xong · gửi ' + codes.length + ' mã' : 'Xong';
+    $('btnDone').textContent = codes.length ? 'Gửi ' + codes.length + ' mã' : 'Xong';
   }
   function finishMulti() {
-    if (!codes.length) { stop().then(function() { window.close(); }); return; }
+    if (!codes.length) { if (TOP && backToApp([])) return; stop().then(function() { window.close(); }); return; }
     var list = codes.slice().reverse();
     $('btnDone').disabled = true;
-    msg('Đang gửi ' + list.length + ' mã về ứng dụng...', 'ok');
+    if (!TOP) msg('Đang gửi ' + list.length + ' mã về ứng dụng...', 'ok');
     sendBack(list);
   }
   if (MULTI) {
@@ -323,7 +334,7 @@
     $('btnZoom').textContent = zoomCur + 'x';
   };
   // Đóng khi đã quét được mã: vẫn gửi danh sách về, không bỏ mã nào
-  $('btnClose').onclick = function() { if (MULTI && codes.length) { finishMulti(); return; } stop().then(function() { window.close(); }); };
+  $('btnClose').onclick = function() { if (MULTI && codes.length) { finishMulti(); return; } if (TOP && backToApp([])) return; stop().then(function() { window.close(); }); };
   $('btnTorch').onclick = function() {
     try {
       var t = qr.getRunningTrackCameraCapabilities().torchFeature();
