@@ -54,6 +54,17 @@
   .tools { display:flex; justify-content:center; gap:12px; flex-wrap:wrap; }
   .pill { min-height:46px; padding:0 22px; border-radius:23px; border:1px solid var(--line); background:var(--panel); color:var(--text); font:700 14px "Be Vietnam Pro", sans-serif; cursor:pointer; }
   @media (prefers-reduced-motion: reduce) { .check svg { animation:none; } }
+  /* Quét liên tục */
+  .multi .stage { height:calc(100vh - 360px); height:calc(100dvh - 360px); }
+  .mbox { display:flex; flex-direction:column; gap:8px; }
+  .mhead { display:flex; align-items:center; justify-content:space-between; font-size:13px; font-weight:700; color:var(--muted); }
+  .mhead b { color:var(--text); font-size:15px; }
+  .mlist { display:flex; flex-wrap:wrap; gap:6px; max-height:64px; overflow-y:auto; }
+  .mlist span { font:700 13px ui-monospace, Menlo, monospace; background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:4px 8px; }
+  .mlist span:first-child { border-color:var(--ok); color:var(--ok); }
+  .btn-done { min-height:52px; border:0; border-radius:14px; background:var(--spx); color:#fff; font:800 16px "Be Vietnam Pro", sans-serif; cursor:pointer; }
+  .btn-done:disabled { opacity:.45; }
+  .snd { border:1px dashed var(--line); background:transparent; color:var(--muted); border-radius:10px; font:600 12px "Be Vietnam Pro", sans-serif; padding:6px 10px; cursor:pointer; }
 </style>
 </head>
 <body>
@@ -82,6 +93,11 @@
     <button class="icon" id="btnFlip" hidden aria-label="Đổi camera"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h13l-3-3M21 17H8l3 3"/></svg></button>
   </div>
   </div>
+  <div class="mbox" id="mbox" hidden>
+    <div class="mhead"><span>Đã quét <b id="cnt">0</b></span><button class="snd" id="btnSnd" hidden>Chạm để bật tiếng bíp</button></div>
+    <div class="mlist" id="mlist"></div>
+    <button class="btn-done" id="btnDone" disabled>Xong</button>
+  </div>
   <div id="result"></div>
   <div style="text-align:center"><button class="pill" id="btnCopy" hidden>Sao chép mã</button></div>
 
@@ -95,6 +111,7 @@
   ];
   var TITLES = { stationEmp: 'Quét mã OPS / nhân viên', stationBorrow: 'Quét mã tài sản', pdaHistory: 'Quét để xem lịch sử', trSn: 'Quét SN vào phiếu', devSn: 'Quét SN tài sản mới' };
   var params = new URLSearchParams(location.search);
+  var MULTI = params.get('m') === '1', seen = {}, codes = [], lastDup = { c: '', t: 0 };
   var qr = null, done = false, torchOn = false, cams = [], camIdx = -1;
   var $ = function(id) { return document.getElementById(id); };
   function msg(t, cls) { var m = $('msg'); m.textContent = t; m.className = 'status' + (cls ? ' ' + cls : ''); }
@@ -105,11 +122,75 @@
     return [F.QR_CODE, F.CODE_128, F.CODE_39, F.CODE_93, F.EAN_13, F.EAN_8, F.UPC_A, F.UPC_E, F.ITF, F.CODABAR, F.DATA_MATRIX, F.PDF_417];
   }
 
+  // Tiếng bíp khi quét được mã (iPhone cần chạm màn hình 1 lần mới phát được âm thanh)
+  var AC = null;
+  function audio() { try { AC = AC || new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} return AC; }
+  function beep() {
+    var a = audio(); if (!a) return;
+    try {
+      if (a.state !== 'running') a.resume();
+      var o = a.createOscillator(), g = a.createGain(), t = a.currentTime;
+      o.type = 'square'; o.frequency.value = 2200;
+      g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.5, t + 0.005); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.09);
+      o.connect(g); g.connect(a.destination); o.start(t); o.stop(t + 0.1);
+    } catch (e) {}
+  }
+  function unlockSound() { var a = audio(); if (a && a.state !== 'running') a.resume().then(function() { $('btnSnd').hidden = true; }).catch(function() {}); else $('btnSnd').hidden = true; }
+  ['touchstart', 'pointerdown'].forEach(function(ev) { document.addEventListener(ev, unlockSound, { passive: true }); });
+
+  // Quét liên tục: camera mở suốt, mỗi mã mới bíp 1 tiếng và vào danh sách; bấm Xong gửi cả danh sách về ứng dụng
+  function onMulti(code) {
+    var now = Date.now();
+    if (seen[code]) {
+      if (lastDup.c !== code || now - lastDup.t > 2500) { lastDup = { c: code, t: now }; msg(code + ' đã quét rồi'); }
+      return;
+    }
+    seen[code] = true; codes.unshift(code);
+    beep();
+    try { if (navigator.vibrate) navigator.vibrate(60); } catch (e) {}
+    var f = $('frame'); f.classList.add('done'); setTimeout(function() { f.classList.remove('done'); }, 350);
+    msg('Đã quét ' + code, 'ok');
+    // Máy tính (cửa sổ bật lên): gửi luôn từng mã. Điện thoại: gửi cả danh sách khi bấm Xong
+    try { if (window.opener && !window.opener.closed) window.opener.postMessage({ type: 'QR_SCANNED', code: code }, '*'); } catch (e) {}
+    renderMulti();
+  }
+  function renderMulti() {
+    $('cnt').textContent = codes.length;
+    $('mlist').innerHTML = codes.map(function(c) { return '<span>' + c.replace(/[&<>]/g, '') + '</span>'; }).join('');
+    $('btnDone').disabled = !codes.length;
+    $('btnDone').textContent = codes.length ? 'Xong · gửi ' + codes.length + ' mã' : 'Xong';
+  }
+  function finishMulti() {
+    if (!codes.length) { stop().then(function() { window.close(); }); return; }
+    var list = codes.slice().reverse(), K = params.get('k'), BACK = params.get('back');
+    $('btnDone').disabled = true;
+    if (K && BACK && /^https:\/\/script\.google\.com\//.test(BACK)) {
+      msg('Đang gửi ' + list.length + ' mã về ứng dụng...', 'ok');
+      stop().then(function() {
+        location.href = BACK + (BACK.indexOf('?') < 0 ? '?' : '&') + 'scanKey=' + encodeURIComponent(K) + '&code=' + encodeURIComponent(list.join(','));
+      });
+      return;
+    }
+    stop().then(function() {
+      if (window.opener && !window.opener.closed) { window.close(); return; }
+      $('result').textContent = list.join(', ');
+      msg('Không gửi tự động được. Sao chép mã rồi dán vào ô quét.', 'bad'); $('btnCopy').hidden = false;
+    });
+  }
+  if (MULTI) {
+    document.body.classList.add('multi'); $('mbox').hidden = false;
+    $('btnDone').onclick = finishMulti;
+    $('btnSnd').onclick = unlockSound;
+    setTimeout(function() { var a = audio(); if (a && a.state !== 'running') $('btnSnd').hidden = false; }, 600);
+  }
+
   function onCode(text) {
     if (done) return;
     var code = String(text || '').trim().toUpperCase();
     if (!code) return;
+    if (MULTI) { onMulti(code); return; }
     done = true;
+    beep();
     try { if (navigator.vibrate) navigator.vibrate(80); } catch (e) {}
     $('frame').classList.add('done');
     $('result').textContent = code;
@@ -162,7 +243,7 @@
                   : { facingMode: 'environment', aspectRatio: { ideal: stageAR() }, width: { ideal: 1920 }, height: { ideal: 1080 }, advanced: [{ focusMode: 'continuous' }] }) },
       onCode, function() {}
     ).then(function() {
-      msg('Đưa mã vào khung, giữ máy thẳng');
+      msg(MULTI ? 'Đưa lần lượt từng mã vào khung' : 'Đưa mã vào khung, giữ máy thẳng');
       ensureBack();
       try {
         var caps = qr.getRunningTrackCameraCapabilities();
@@ -237,7 +318,8 @@
     try { qr.applyVideoConstraints({ advanced: [{ zoom: zoomCur }] }); } catch (e) {}
     $('btnZoom').textContent = zoomCur + 'x';
   };
-  $('btnClose').onclick = function() { stop().then(function() { window.close(); }); };
+  // Đóng khi đã quét được mã: vẫn gửi danh sách về, không bỏ mã nào
+  $('btnClose').onclick = function() { if (MULTI && codes.length) { finishMulti(); return; } stop().then(function() { window.close(); }); };
   $('btnTorch').onclick = function() {
     try {
       var t = qr.getRunningTrackCameraCapabilities().torchFeature();
